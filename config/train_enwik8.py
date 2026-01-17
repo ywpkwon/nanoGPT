@@ -1,5 +1,9 @@
 # train a character-level model on enwik8
 
+wandb_log = True
+wandb_project = 'owt'
+wandb_run_name = 'gpt2-124M'
+
 out_dir = "out-enwik8"
 eval_interval = 1000
 eval_iters = 200
@@ -19,7 +23,7 @@ block_size = 256  # context of up to 256 previous characters
 
 # baby GPT model :)
 n_layer = 6
-n_head = 6
+n_head = 8
 n_embd = 512
 dropout = 0.2
 
