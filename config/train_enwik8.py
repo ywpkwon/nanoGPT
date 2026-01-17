@@ -1,9 +1,5 @@
 # train a character-level model on enwik8
 
-wandb_log = True
-wandb_project = 'owt'
-wandb_run_name = 'gpt2-124M'
-
 out_dir = "out-enwik8"
 eval_interval = 1000
 eval_iters = 200
@@ -12,9 +8,9 @@ log_interval = 100  # don't print too too often
 # only save when val improves
 always_save_checkpoint = False
 
-# wandb_log = True # override via command line if you like
-# wandb_project = 'nanogpt'
-# wandb_run_name = 'enwik8'
+wandb_log = True # override via command line if you like
+wandb_project = 'nanogpt'
+wandb_run_name = 'enwik8'
 
 dataset = "enwik8"
 gradient_accumulation_steps = 1
@@ -36,7 +32,7 @@ beta2 = 0.99
 warmup_iters = 200  # not super necessary potentially
 
 # on macbook also add
-# device = 'cpu'  # run on cpu only
-compile = True  # do not torch compile the model
+device = 'cpu'  # run on cpu only
+compile = False  # do not torch compile the model
 # init_from = 'resume'
 # eval_only = True
