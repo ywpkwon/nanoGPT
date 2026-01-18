@@ -264,7 +264,7 @@ def get_lr(it):
     return min_lr + coeff * (learning_rate - min_lr)
 
 # logging
-if wandb_log and master_process:
+if wandb_log and master_process and not eval_only:
     import wandb
     # let's use outdir as wandb run name
     wandb.init(project=wandb_project, name=out_dir, config=config)
@@ -278,7 +278,7 @@ running_mfu = -1.0
 
 # tqdm progress bar (only on master to avoid messy multi-process bars)
 pbar = None
-if master_process:
+if master_process and not eval_only:
     # train.py breaks when iter_num > max_iters, so it effectively runs iter_num = 0..max_iters inclusive
     # If you want the bar to show max_iters+1 steps, set total=max_iters+1.
     pbar = tqdm(
@@ -304,7 +304,7 @@ while True:
         else:
             print(msg)
             
-        if wandb_log:
+        if wandb_log and not eval_only:
             log_dict = {
                 "iter": iter_num,
                 "tokens": iter_num * tokens_per_iter,
@@ -338,7 +338,7 @@ while True:
                 else:
                     print(msg)
                 torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
-    if iter_num == 0 and eval_only:
+    if eval_only:
         break
 
     # forward backward update, with optional gradient accumulation to simulate larger batch size
