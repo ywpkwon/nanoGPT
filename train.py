@@ -82,7 +82,8 @@ device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps'
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
 compile = True # use PyTorch 2.0 to compile the model to be faster
 # -----------------------------------------------------------------------------
-config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
+config_keys = [k for k,v in globals().items()
+               if not k.startswith('_') and isinstance(v, (int,float,bool,str,tuple,list))]
 exec(open('configurator.py').read()) # overrides from command line or config file
 config = {k: globals()[k] for k in config_keys} # will be useful for logging
 # -----------------------------------------------------------------------------
@@ -153,8 +154,19 @@ if os.path.exists(meta_path):
     print(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
 
 # model init
-model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
-                  bias=bias, vocab_size=None, dropout=dropout) # start with model_args from command line
+model_args = dict(
+    n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
+    bias=bias, vocab_size=None, dropout=dropout,
+    # memory
+    use_mem=use_mem,
+    mem_ns=mem_ns,
+    mem_heads=mem_heads,
+    mem_table_size=mem_table_size,
+    mem_dim=mem_dim,
+    mem_gate=mem_gate,
+    mem_alpha_init=mem_alpha_init,
+)
+print("model_args: ", model_args)
 if init_from == 'scratch':
     # init a new model from scratch
     print("Initializing a new model from scratch")
@@ -172,7 +184,8 @@ elif init_from == 'resume':
     checkpoint_model_args = checkpoint['model_args']
     # force these config attributes to be equal otherwise we can't even resume training
     # the rest of the attributes (e.g. dropout) can stay as desired from command line
-    for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size']:
+    for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size', 
+        'use_mem', 'mem_ns', 'mem_heads', 'mem_table_size', 'mem_dim', 'mem_gate']:
         model_args[k] = checkpoint_model_args[k]
     # create the model
     gptconf = GPTConfig(**model_args)
@@ -292,13 +305,22 @@ while True:
             print(msg)
             
         if wandb_log:
-            wandb.log({
+            log_dict = {
                 "iter": iter_num,
-                "train/loss": losses['train'],
-                "val/loss": losses['val'],
+                "tokens": iter_num * tokens_per_iter,
+                "train/loss": losses["train"],
+                "val/loss": losses["val"],
+                "val/bpc": losses["val"] / math.log(2),
                 "lr": lr,
-                "mfu": running_mfu*100, # convert to percentage
-            })
+                "mfu": running_mfu * 100,
+            }
+
+            # log mem alpha if present
+            if hasattr(raw_model, "use_mem") and raw_model.use_mem:
+                log_dict["mem/alpha"] = float(raw_model.mem_alpha.detach().float().cpu())
+
+            wandb.log(log_dict)
+
         if losses['val'] < best_val_loss or always_save_checkpoint:
             best_val_loss = losses['val']
             if iter_num > 0:

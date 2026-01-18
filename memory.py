@@ -22,6 +22,13 @@ def _fnv1a_hash_ngram(windows: torch.Tensor, seed: int, prime: int) -> torch.Ten
     return h
 
 
+def _to_int64_signed(x: int) -> int:
+    x &= (1 << 64) - 1          # keep low 64 bits
+    if x >= (1 << 63):
+        x -= (1 << 64)          # convert to signed range
+    return x
+
+
 @dataclass(frozen=True)
 class MemorySpec:
     ns: Sequence[int] = (8, 16)
@@ -70,8 +77,10 @@ class HashedNgramMemory(nn.Module):
 
         # Different seeds/primes per head (fixed constants)
         # primes should be odd and large-ish
-        self._seeds = [0xCBF29CE484222325 + 0x9E3779B97F4A7C15 * h for h in range(self.heads)]
-        self._primes = [0x100000001B3 + 0x9E3779B97F4A7C15 * (h + 1) for h in range(self.heads)]
+        self._seeds = [_to_int64_signed(0xCBF29CE484222325 + 0x9E3779B97F4A7C15 * h)
+                for h in range(self.heads)]
+        self._primes = [_to_int64_signed(0x100000001B3 + 0x9E3779B97F4A7C15 * (h + 1))
+                        for h in range(self.heads)]
 
     def forward(self, idx: torch.Tensor) -> torch.Tensor:
         """
