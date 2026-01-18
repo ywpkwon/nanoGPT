@@ -55,6 +55,14 @@ n_head = 12
 n_embd = 768
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
 bias = False # do we use bias inside LayerNorm and Linear layers?
+# memory (Engram-ish)
+use_mem = False
+mem_ns = (8, 16)
+mem_heads = 2
+mem_table_size = 65536
+mem_dim = 64
+mem_gate = True
+mem_alpha_init = 0.0
 # adamw optimizer
 learning_rate = 6e-4 # max learning rate
 max_iters = 600000 # total number of training iterations
@@ -245,7 +253,8 @@ def get_lr(it):
 # logging
 if wandb_log and master_process:
     import wandb
-    wandb.init(project=wandb_project, name=wandb_run_name, config=config)
+    # let's use outdir as wandb run name
+    wandb.init(project=wandb_project, name=out_dir, config=config)
 
 # training loop
 X, Y = get_batch('train') # fetch the very first batch

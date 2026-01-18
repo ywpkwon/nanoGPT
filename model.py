@@ -15,6 +15,8 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+from memory import HashedNgramMemory, MemorySpec
+
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
 
@@ -114,6 +116,15 @@ class GPTConfig:
     n_embd: int = 768
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+        
+    # Engram inspired
+    use_mem: bool = False
+    mem_ns: tuple = (8, 16)
+    mem_heads: int = 2
+    mem_table_size: int = 65536
+    mem_dim: int = 64
+    mem_gate: bool = True
+    mem_alpha_init: float = 0.0
 
 class GPT(nn.Module):
 
@@ -130,6 +141,27 @@ class GPT(nn.Module):
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
         ))
+
+        # memory block
+        self.use_mem = config.use_mem
+        if self.use_mem:
+            spec = MemorySpec(
+                ns=config.mem_ns,
+                heads=config.mem_heads,
+                table_size=config.mem_table_size,
+                dim=config.mem_dim,
+            )
+            self.mem = HashedNgramMemory(vocab_size=config.vocab_size, spec=spec)
+
+            # scalar warm-start; 0.0 means "off" initially
+            self.mem_alpha = nn.Parameter(torch.tensor(float(config.mem_alpha_init)))
+
+            if config.mem_gate:
+                self.mem_gate = nn.Linear(config.n_embd, 1, bias=True)
+            else:
+                self.mem_gate = None
+        self.mem_max_n = max(config.mem_ns) if self.use_mem else 0
+
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
@@ -182,12 +214,52 @@ class GPT(nn.Module):
         x = self.transformer.ln_f(x)
 
         if targets is not None:
-            # if we are given some desired targets also calculate the loss
-            logits = self.lm_head(x)
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+            # full sequence
+            x_use = x
+            logits_t = self.lm_head(x_use)
+
+            if self.use_mem:
+                bias_m = self.mem(idx)                         # (B, T, V)
+                if self.mem_gate is not None:
+                    g = torch.sigmoid(self.mem_gate(x_use))    # (B, T, 1)
+                else:
+                    g = 1.0
+                logits = logits_t + (self.mem_alpha * g) * bias_m.to(logits_t.dtype)
+            else:
+                logits = logits_t
+
+            loss = F.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                targets.view(-1),
+                ignore_index=-1,
+            )
+
         else:
-            # inference-time mini-optimization: only forward the lm_head on the very last position
-            logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
+            # inference-time mini-optimization: only last position
+            x_use = x[:, [-1], :]
+            logits_t = self.lm_head(x_use)                      # (B, 1, V)
+
+            if self.use_mem:
+                # We only need memory bias for the last position.
+                # Provide only the suffix context; mem() will output length L, and we take last.
+                # Keep at least mem_max_n tokens if possible.
+                if self.mem_max_n > 0:
+                    idx_ctx = idx[:, -self.mem_max_n:]          # (B, <=mem_max_n)
+                else:
+                    idx_ctx = idx
+
+                bias_ctx = self.mem(idx_ctx)                    # (B, L, V)
+                bias_last = bias_ctx[:, [-1], :]                # (B, 1, V)
+
+                if self.mem_gate is not None:
+                    g = torch.sigmoid(self.mem_gate(x_use))     # (B, 1, 1)
+                else:
+                    g = 1.0
+
+                logits = logits_t + (self.mem_alpha * g) * bias_last.to(logits_t.dtype)
+            else:
+                logits = logits_t
+
             loss = None
 
         return logits, loss
